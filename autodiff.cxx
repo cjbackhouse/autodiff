@@ -37,23 +37,26 @@ public:
   }
 };
 
+class Abstract
+{
+private:
+  Abstract() {}
+};
+
 template<int... Xs> struct Indices;
 
-template<> struct Indices<>
+template<> struct Indices<>: public Abstract
 {
   static const bool empty = true;
   static const int head = std::numeric_limits<int>::max(); // TODO bad hack
-  static const Indices<> tail;
 
   typedef Diffs<> Diffs_t;
 };
 
-template<int X, int... Xs> struct Indices<X, Xs...>
+template<int X, int... Xs> struct Indices<X, Xs...>: public Abstract
 {
-  static const int head = X;
-  static const Indices<Xs...> tail;
   static const bool empty = false;
-
+  static const int head = X;
   typedef Indices<Xs...> tail_t;
 
   typedef Diffs<X, Xs...> Diffs_t;
@@ -63,7 +66,7 @@ template<int X, int... Xs> struct Indices<X, Xs...>
 template<class A, class B> struct ConcatT;
 template<class A, class B> using Concat_t = typename ConcatT<A, B>::type;
 
-template<int... Xs, int... Ys> struct ConcatT<Indices<Xs...>, Indices<Ys...>>
+template<int... Xs, int... Ys> struct ConcatT<Indices<Xs...>, Indices<Ys...>>: public Abstract
 {
   typedef Indices<Xs..., Ys...> type;
 };
@@ -71,34 +74,34 @@ template<int... Xs, int... Ys> struct ConcatT<Indices<Xs...>, Indices<Ys...>>
 template<class A, class B> struct ZipT;
 template<class A, class B> using Zip_t = typename ZipT<A, B>::type;
 
-template<> struct ZipT<Indices<>, Indices<>>
+template<> struct ZipT<Indices<>, Indices<>>: public Abstract
 {
   typedef Indices<> type;
 };
 
-template<int... Xs> struct ZipT<Indices<Xs...>, Indices<>>
+template<int... Xs> struct ZipT<Indices<Xs...>, Indices<>>: public Abstract
 {
   typedef Indices<Xs...> type;
 };
 
-template<int... Ys> struct ZipT<Indices<>, Indices<Ys...>>
+template<int... Ys> struct ZipT<Indices<>, Indices<Ys...>>: public Abstract
 {
   typedef Indices<Ys...> type;
 };
 
-template<int XY, int... Xs, int... Ys> struct ZipT<Indices<XY, Xs...>, Indices<XY, Ys...>>
+template<int XY, int... Xs, int... Ys> struct ZipT<Indices<XY, Xs...>, Indices<XY, Ys...>>: public Abstract
 {
   typedef Concat_t<Indices<XY>, Zip_t<Indices<Xs...>, Indices<Ys...>>> type;
 };
 
-template<int X, int... Xs, int Y, int... Ys> struct ZipT<Indices<X, Xs...>, Indices<Y, Ys...>>
+template<int X, int... Xs, int Y, int... Ys> struct ZipT<Indices<X, Xs...>, Indices<Y, Ys...>>: public Abstract
 {
   typedef std::conditional_t<(X < Y),
     Concat_t<Indices<X>, Zip_t<Indices<Xs...>, Indices<Y, Ys...>>>,
     Concat_t<Indices<Y>, Zip_t<Indices<X, Xs...>, Indices<Ys...>>>> type;
 };
 
-template<class IDXS> struct CopyDiffs
+template<class IDXS> struct CopyDiffs: public Abstract
 {
   template<int... Xs, int... Ys> static void Copy(const Diffs<Xs...>& from,
                                                   Diffs<Ys...>& to)
@@ -124,44 +127,52 @@ template<int X, int... Xs> Diffs<X, Xs...> Concat(double d,
   return ret;
 }
 
-template<class Op, int... Xs, int... Ys, int... Ws, int... Zs>
-typename Zip_t<Indices<Xs...>, Indices<Ys...>>::Diffs_t
-ZipWith(Indices<Xs...> i, Indices<Ys...> j,
-        const Diffs<Ws...>& a, const Diffs<Zs...>& b)
+template<class Op, class IDXA, class IDXB> struct ZipWithS;
+
+template<class Op, int... Xs, int... Ys> struct
+ZipWithS<Op, Indices<Xs...>, Indices<Ys...>>: public Abstract
 {
-  if constexpr(i.empty && j.empty){
-    Diffs<> ret;
-    ret.val = Op::op(a.val, 0, b.val, 0).val;
-    return ret;
+  typedef typename Zip_t<Indices<Xs...>, Indices<Ys...>>::Diffs_t Res_t;
+
+  template<int... Ws, int... Zs> static Res_t Zip(const Diffs<Ws...>& a, const Diffs<Zs...>& b)
+  {
+    using i = Indices<Xs...>;
+    using j = Indices<Ys...>;
+
+    if constexpr(i::empty && j::empty){
+      Diffs<> ret;
+      ret.val = Op::op(a.val, 0, b.val, 0).val;
+      return ret;
+    }
+    else{
+      if constexpr(j::empty || (i::head < j::head)){
+        return Concat<i::head>(Op::op(a.val, a.template diff<i::head>(),
+                                      b.val, 0).diff,
+                               ZipWithS<Op, typename i::tail_t, j>::Zip(a, b));
+      }
+
+      if constexpr(i::head == j::head){
+        return Concat<i::head>(Op::op(a.val, a.template diff<i::head>(),
+                                      b.val, b.template diff<i::head>()).diff,
+                               ZipWithS<Op, typename i::tail_t, typename j::tail_t>::Zip(a, b));
+      }
+
+      if constexpr(i::empty || j::head < i::head){
+        return Concat<j::head>(Op::op(a.val, 0,
+                                      b.val, b.template diff<j::head>()).diff,
+                               ZipWithS<Op, i, typename j::tail_t>::Zip(a, b));
+      }
+    }
+
+    abort();
   }
-  else{
-    if constexpr(j.empty || i.head < j.head){
-      return Concat<i.head>(Op::op(a.val, a.template diff<i.head>(),
-                                   b.val, 0).diff,
-                            ZipWith<Op>(i.tail, j, a, b));
-    }
-
-    if constexpr(i.head == j.head){
-      return Concat<i.head>(Op::op(a.val, a.template diff<i.head>(),
-                                   b.val, b.template diff<i.head>()).diff,
-                            ZipWith<Op>(i.tail, j.tail, a, b));
-    }
-
-    if constexpr(i.empty || j.head < i.head){
-      return Concat<j.head>(Op::op(a.val, 0,
-                                   b.val, b.template diff<j.head>()).diff,
-                            ZipWith<Op>(i, j.tail, a, b));
-    }
-  }
-
-  abort();
-}
+};
 
 template<class Op, int... Xs, int... Ys>
 typename Zip_t<Indices<Xs...>, Indices<Ys...>>::Diffs_t
 ZipWith(const Diffs<Xs...>& a, const Diffs<Ys...>& b)
 {
-  return ZipWith<Op>(Indices<Xs...>(), Indices<Ys...>(), a, b);
+  return ZipWithS<Op, Indices<Xs...>, Indices<Ys...>>::Zip(a, b);
 }
 
 struct OpRet
@@ -169,7 +180,7 @@ struct OpRet
   double val; double diff;
 };
 
-struct AddOp
+struct AddOp: public Abstract
 {
   static OpRet op(double u, double du, double v, double dv)
   {
@@ -177,7 +188,7 @@ struct AddOp
   }
 };
 
-struct SubOp
+struct SubOp: public Abstract
 {
   static OpRet op(double u, double du, double v, double dv)
   {
@@ -185,7 +196,7 @@ struct SubOp
   }
 };
 
-struct MulOp
+struct MulOp: public Abstract
 {
   static OpRet op(double u, double du, double v, double dv)
   {
@@ -193,7 +204,7 @@ struct MulOp
   }
 };
 
-struct DivOp
+struct DivOp: public Abstract
 {
   static OpRet op(double u, double du, double v, double dv)
   {
