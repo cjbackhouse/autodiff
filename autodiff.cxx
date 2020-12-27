@@ -58,26 +58,43 @@ template<int X, int... Xs> struct Indices<X, Xs...>
 };
 
 
-template<int... Xs, int... Ys> Indices<Xs..., Ys...>
-Concat(const Indices<Xs...>& a, const Indices<Ys...>& b)
+template<class A, class B> struct ConcatT;
+template<class A, class B> using Concat_t = typename ConcatT<A, B>::type;
+
+template<int... Xs, int... Ys> struct ConcatT<Indices<Xs...>, Indices<Ys...>>
 {
-  return Indices<Xs..., Ys...>();
-}
+  typedef Indices<Xs..., Ys...> type;
+};
 
-template<int... Xs, int... Ys> auto Zip(const Indices<Xs...>& a,
-                                        const Indices<Ys...>& b)
+template<class A, class B> struct ZipT;
+template<class A, class B> using Zip_t = typename ZipT<A, B>::type;
+
+template<> struct ZipT<Indices<>, Indices<>>
 {
-  if constexpr(a.empty) return b;
-  if constexpr(b.empty) return a;
+  typedef Indices<> type;
+};
 
-  if constexpr(!a.empty && !b.empty){
-    if constexpr(a.head < b.head ) return Concat(Indices<a.head>(), Zip(a.tail, b));
-    if constexpr(a.head == b.head) return Concat(Indices<a.head>(), Zip(a.tail, b.tail));
-    if constexpr(a.head > b.head ) return Concat(Indices<b.head>(), Zip(a, b.tail));
-  }
+template<int... Xs> struct ZipT<Indices<Xs...>, Indices<>>
+{
+  typedef Indices<Xs...> type;
+};
 
-  abort();
-}
+template<int... Ys> struct ZipT<Indices<>, Indices<Ys...>>
+{
+  typedef Indices<Ys...> type;
+};
+
+template<int XY, int... Xs, int... Ys> struct ZipT<Indices<XY, Xs...>, Indices<XY, Ys...>>
+{
+  typedef Concat_t<Indices<XY>, Zip_t<Indices<Xs...>, Indices<Ys...>>> type;
+};
+
+template<int X, int... Xs, int Y, int... Ys> struct ZipT<Indices<X, Xs...>, Indices<Y, Ys...>>
+{
+  typedef std::conditional_t<(X < Y),
+    Concat_t<Indices<X>, Zip_t<Indices<Xs...>, Indices<Y, Ys...>>>,
+    Concat_t<Indices<Y>, Zip_t<Indices<X, Xs...>, Indices<Ys...>>>> type;
+};
 
 template<int... Xs, int... Ys> void CopyDiffs(Indices<> is, const Diffs<Xs...>& from, Diffs<Ys...>& to)
 {
@@ -101,8 +118,7 @@ template<int X, int... Xs> Diffs<X, Xs...> Concat(double d,
 }
 
 template<class Op, int... Xs, int... Ys, int... Ws, int... Zs>
-typename decltype(Zip(Indices<Xs...>(), Indices<Ys...>()))::Diffs_t
-//auto
+typename Zip_t<Indices<Xs...>, Indices<Ys...>>::Diffs_t
 ZipWith(Indices<Xs...> i, Indices<Ys...> j,
         const Diffs<Ws...>& a, const Diffs<Zs...>& b)
 {
@@ -135,8 +151,7 @@ ZipWith(Indices<Xs...> i, Indices<Ys...> j,
 }
 
 template<class Op, int... Xs, int... Ys>
-typename decltype(Zip(Indices<Xs...>(), Indices<Ys...>()))::Diffs_t
-//auto
+typename Zip_t<Indices<Xs...>, Indices<Ys...>>::Diffs_t
 ZipWith(const Diffs<Xs...>& a, const Diffs<Ys...>& b)
 {
   return ZipWith<Op>(Indices<Xs...>(), Indices<Ys...>(), a, b);
