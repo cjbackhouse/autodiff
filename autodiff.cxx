@@ -100,77 +100,108 @@ template<int X, int... Xs> Diffs<X, Xs...> Concat(double d,
   return ret;
 }
 
-template<int... Xs, int... Ys, int... Ws, int... Zs>
+template<class Op, int... Xs, int... Ys, int... Ws, int... Zs>
 typename decltype(Zip(Indices<Xs...>(), Indices<Ys...>()))::Diffs_t
 //auto
-Add(Indices<Xs...> i, Indices<Ys...> j,
-    const Diffs<Ws...>& a, const Diffs<Zs...>& b)
+ZipWith(Indices<Xs...> i, Indices<Ys...> j,
+        const Diffs<Ws...>& a, const Diffs<Zs...>& b)
 {
   if constexpr(i.empty && j.empty){
     Diffs<> ret;
-    ret.val = a.val + b.val;
+    ret.val = Op::op(a.val, 0, b.val, 0).val;
     return ret;
   }
   else{
     if constexpr(j.empty || i.head < j.head){
-      return Concat<i.head>(a.template diff<i.head>(), Add(i.tail, j, a, b));
+      return Concat<i.head>(Op::op(a.val, a.template diff<i.head>(),
+                                   b.val, 0).diff,
+                            ZipWith<Op>(i.tail, j, a, b));
     }
 
     if constexpr(i.head == j.head){
-      return Concat<i.head>(a.template diff<i.head>() + b.template diff<i.head>(),
-                            Add(i.tail, j.tail, a, b));
+      return Concat<i.head>(Op::op(a.val, a.template diff<i.head>(),
+                                   b.val, b.template diff<i.head>()).diff,
+                            ZipWith<Op>(i.tail, j.tail, a, b));
     }
 
     if constexpr(i.empty || j.head < i.head){
-      return Concat<j.head>(b.template diff<j.head>(), Add(i, j.tail, a, b));
+      return Concat<j.head>(Op::op(a.val, 0,
+                                   b.val, b.template diff<j.head>()).diff,
+                            ZipWith<Op>(i, j.tail, a, b));
     }
   }
 
   abort();
 }
 
-template<int... Xs, int... Ys, int... Ws, int... Zs>
+template<class Op, int... Xs, int... Ys>
 typename decltype(Zip(Indices<Xs...>(), Indices<Ys...>()))::Diffs_t
 //auto
-Mul(Indices<Xs...> i, Indices<Ys...> j,
-    const Diffs<Ws...>& a, const Diffs<Zs...>& b)
+ZipWith(const Diffs<Xs...>& a, const Diffs<Ys...>& b)
 {
-  if constexpr(i.empty && j.empty){
-    Diffs<> ret;
-    ret.val = a.val * b.val;
-    return ret;
-  }
-  else{
-    if constexpr(j.empty || i.head < j.head){
-      return Concat<i.head>(a.template diff<i.head>() * b.val,
-                            Mul(i.tail, j, a, b));
-    }
-
-    if constexpr(i.head == j.head){
-      return Concat<i.head>(a.template diff<i.head>() * b.val +
-                            b.template diff<i.head>() * a.val,
-                            Mul(i.tail, j.tail, a, b));
-    }
-
-    if constexpr(i.empty || j.head < i.head){
-      return Concat<j.head>(b.template diff<j.head>() * a.val,
-                            Mul(i, j.tail, a, b));
-    }
-  }
-
-  abort();
+  return ZipWith<Op>(Indices<Xs...>(), Indices<Ys...>(), a, b);
 }
+
+struct OpRet
+{
+  double val; double diff;
+};
+
+struct AddOp
+{
+  static OpRet op(double u, double du, double v, double dv)
+  {
+    return {u+v, du+dv};
+  }
+};
+
+struct SubOp
+{
+  static OpRet op(double u, double du, double v, double dv)
+  {
+    return {u-v, du-dv};
+  }
+};
+
+struct MulOp
+{
+  static OpRet op(double u, double du, double v, double dv)
+  {
+    return {u*v, u*dv + v*du};
+  }
+};
+
+struct DivOp
+{
+  static OpRet op(double u, double du, double v, double dv)
+  {
+    return {u/v, (v*du - u*dv ) / (v*v)};
+  }
+};
+
 
 template<int... Xs, int... Ys> auto
 operator+(const Diffs<Xs...>& a, const Diffs<Ys...>& b)
 {
-  return Add(Indices<Xs...>(), Indices<Ys...>(), a, b);
+  return ZipWith<AddOp>(a, b);
+}
+
+template<int... Xs, int... Ys> auto
+operator-(const Diffs<Xs...>& a, const Diffs<Ys...>& b)
+{
+  return ZipWith<SubOp>(a, b);
 }
 
 template<int... Xs, int... Ys> auto
 operator*(const Diffs<Xs...>& a, const Diffs<Ys...>& b)
 {
-  return Mul(Indices<Xs...>(), Indices<Ys...>(), a, b);
+  return ZipWith<MulOp>(a, b);
+}
+
+template<int... Xs, int... Ys> auto
+operator/(const Diffs<Xs...>& a, const Diffs<Ys...>& b)
+{
+  return ZipWith<DivOp>(a, b);
 }
 
 template<int... Xs> std::ostream& operator<<(std::ostream& os, const Diffs<Xs...>& d)
