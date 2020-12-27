@@ -54,6 +54,8 @@ template<int X, int... Xs> struct Indices<X, Xs...>
   static const Indices<Xs...> tail;
   static const bool empty = false;
 
+  typedef Indices<Xs...> tail_t;
+
   typedef Diffs<X, Xs...> Diffs_t;
 };
 
@@ -96,15 +98,20 @@ template<int X, int... Xs, int Y, int... Ys> struct ZipT<Indices<X, Xs...>, Indi
     Concat_t<Indices<Y>, Zip_t<Indices<X, Xs...>, Indices<Ys...>>>> type;
 };
 
-template<int... Xs, int... Ys> void CopyDiffs(Indices<> is, const Diffs<Xs...>& from, Diffs<Ys...>& to)
+template<class IDXS> struct CopyDiffs
 {
-}
-
-template<int... Zs, int... Xs, int... Ys> void CopyDiffs(Indices<Zs...> is, const Diffs<Xs...>& from, Diffs<Ys...>& to)
-{
-  to.template diff<is.head>() = from.template diff<is.head>();
-  /*if constexpr(sizeof...(Zs) > 0)*/ CopyDiffs(is.tail, from, to);
-}
+  template<int... Xs, int... Ys> static void Copy(const Diffs<Xs...>& from,
+                                                  Diffs<Ys...>& to)
+  {
+    if constexpr(IDXS::empty){
+      return;
+    }
+    else{
+      to.template diff<IDXS::head>() = from.template diff<IDXS::head>();
+      CopyDiffs<typename IDXS::tail_t>::Copy(from, to);
+    }
+  }
+};
 
 // Add d/dX = d to b (X < Xs[0]) TODO figure out static_assert
 template<int X, int... Xs> Diffs<X, Xs...> Concat(double d,
@@ -112,7 +119,7 @@ template<int X, int... Xs> Diffs<X, Xs...> Concat(double d,
 {
   Diffs<X, Xs...> ret;
   ret.val = b.val;
-  CopyDiffs(Indices<Xs...>(), b, ret);
+  CopyDiffs<Indices<Xs...>>::Copy(b, ret);
   ret.template diff<X>() = d;
   return ret;
 }
