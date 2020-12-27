@@ -129,10 +129,48 @@ Add(Indices<Xs...> i, Indices<Ys...> j,
   abort();
 }
 
+template<int... Xs, int... Ys, int... Ws, int... Zs>
+typename decltype(Zip(Indices<Xs...>(), Indices<Ys...>()))::Diffs_t
+//auto
+Mul(Indices<Xs...> i, Indices<Ys...> j,
+    const Diffs<Ws...>& a, const Diffs<Zs...>& b)
+{
+  if constexpr(i.empty && j.empty){
+    Diffs<> ret;
+    ret.val = a.val * b.val;
+    return ret;
+  }
+  else{
+    if constexpr(j.empty || i.head < j.head){
+      return Concat<i.head>(a.template diff<i.head>() * b.val,
+                            Mul(i.tail, j, a, b));
+    }
+
+    if constexpr(i.head == j.head){
+      return Concat<i.head>(a.template diff<i.head>() * b.val +
+                            b.template diff<i.head>() * a.val,
+                            Mul(i.tail, j.tail, a, b));
+    }
+
+    if constexpr(i.empty || j.head < i.head){
+      return Concat<j.head>(b.template diff<j.head>() * a.val,
+                            Mul(i, j.tail, a, b));
+    }
+  }
+
+  abort();
+}
+
 template<int... Xs, int... Ys> auto
 operator+(const Diffs<Xs...>& a, const Diffs<Ys...>& b)
 {
   return Add(Indices<Xs...>(), Indices<Ys...>(), a, b);
+}
+
+template<int... Xs, int... Ys> auto
+operator*(const Diffs<Xs...>& a, const Diffs<Ys...>& b)
+{
+  return Mul(Indices<Xs...>(), Indices<Ys...>(), a, b);
 }
 
 template<int... Xs> std::ostream& operator<<(std::ostream& os, const Diffs<Xs...>& d)
@@ -174,6 +212,14 @@ int main()
   std::cout << "d+f:\n" << (d+f) << std::endl;
 
   std::cout << "e+f:\n" << (e+f) << std::endl;
+
+
+  std::cout << "d*e:\n" << (d*e) << std::endl;
+
+  std::cout << "d*f:\n" << (d*f) << std::endl;
+
+  std::cout << "e*f:\n" << (e*f) << std::endl;
+
 
   return 0;
 }
