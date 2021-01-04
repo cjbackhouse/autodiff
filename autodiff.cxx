@@ -3,6 +3,7 @@
 #include <array>
 #include <iostream>
 #include <limits>
+#include <tuple>
 
 // Default - may be specialized by user
 template<int X> std::string var_name()
@@ -57,6 +58,8 @@ template<int... Xs> class Diffs
   using Idxs = Indices<Xs...>;
 
 public:
+  Diffs() {} // default uninitialized(!)
+
   void Print(std::ostream& os) const
   {
     os << "Value = " << val << std::endl;
@@ -76,6 +79,11 @@ protected:
   }
 
   std::array<double, Idxs::size> diffs;
+
+  // Grant Concat() access to this constructor
+  template<int Y, int... Ys> friend Diffs<Y, Ys...> Concat(double d, const Diffs<Ys...>& b);
+
+  Diffs(double v, const decltype(diffs)& d) : val(v), diffs(d) {}
 };
 
 
@@ -112,35 +120,24 @@ template<int XY, int... Xs, int... Ys> struct ZipT<Indices<XY, Xs...>, Indices<X
 
 template<int X, int... Xs, int Y, int... Ys> struct ZipT<Indices<X, Xs...>, Indices<Y, Ys...>>: public Abstract
 {
+  using IX = Indices<X, Xs...>;
+  using IY = Indices<Y, Ys...>;
+
   typedef std::conditional_t<(X < Y),
-    Concat_t<Indices<X>, Zip_t<Indices<Xs...>, Indices<Y, Ys...>>>,
-    Concat_t<Indices<Y>, Zip_t<Indices<X, Xs...>, Indices<Ys...>>>> type;
+    Concat_t<Indices<X>, Zip_t<Indices<Xs...>, IY>>,
+    Concat_t<Indices<Y>, Zip_t<IX, Indices<Ys...>>>> type;
 };
 
-template<class IDXS> struct CopyDiffs: public Abstract
-{
-  template<int... Xs, int... Ys> static void Copy(const Diffs<Xs...>& from,
-                                                  Diffs<Ys...>& to)
-  {
-    if constexpr(IDXS::empty){
-      return;
-    }
-    else{
-      to.template diff<IDXS::head>() = from.template diff<IDXS::head>();
-      CopyDiffs<typename IDXS::tail_t>::Copy(from, to);
-    }
-  }
-};
-
-// Add d/dX = d to b (X < Xs[0]) TODO figure out static_assert
+// Add d/dX = d to b (X < Xs[0])
 template<int X, int... Xs> Diffs<X, Xs...> Concat(double d,
                                                   const Diffs<Xs...>& b)
 {
-  Diffs<X, Xs...> ret;
-  ret.val = b.val;
-  CopyDiffs<Indices<Xs...>>::Copy(b, ret);
-  ret.template diff<X>() = d;
-  return ret;
+  static_assert(X < Indices<Xs...>::head);
+
+  return Diffs<X, Xs...>(b.val,
+                         std::apply([d](auto... n){
+                           return std::array<double, sizeof...(n)+1>{d, n...};},
+                           b.diffs));
 }
 
 template<class Op, class IDXA, class IDXB> struct ZipWithS;
