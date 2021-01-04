@@ -70,7 +70,7 @@ template<int... Xs> class Diffs
 public:
   Diffs() {} // default uninitialized(!)
 
-  static Diffs Make(double val, const std::array<double, sizeof...(Xs)>& arr)
+  static constexpr Diffs Make(double val, const std::array<double, sizeof...(Xs)>& arr)
   {
     return Diffs(val, arr);
   }
@@ -155,7 +155,7 @@ template<int... Xs, int... Ys> struct ZipT<Indices<Xs...>, Indices<Ys...>>: publ
 };
 
 // Concat(w, [x, y, z]) = [w, x, y, z]
-template<size_t N> std::array<double, N+1> Concat(double d, const std::array<double, N>& arr)
+template<size_t N> constexpr std::array<double, N+1> Concat(double d, const std::array<double, N>& arr)
 {
   return std::apply([d](auto... n){return std::array<double, sizeof...(n)+1>{d, n...};}, arr);
 }
@@ -174,7 +174,7 @@ ZipWithS<Op, Indices<Xs...>, Indices<Ys...>>: public Abstract
   // Returns the result of zipping just indices Ws.. from a and Zs... from
   // b. Zipping here means applying the operator to combine each pair of
   // entries sharing the same index.
-  template<int... Ws, int... Zs> static Res_t Zip(const Diffs<Ws...>& a, const Diffs<Zs...>& b)
+  template<int... Ws, int... Zs> static constexpr Res_t Zip(const Diffs<Ws...>& a, const Diffs<Zs...>& b)
   {
     using i = Indices<Xs...>;
     using j = Indices<Ys...>;
@@ -213,15 +213,16 @@ ZipWithS<Op, Indices<Xs...>, Indices<Ys...>>: public Abstract
 
 // Wrap all that up in a friendlier function that automatically applies to all
 // indices.
-template<class Op, int... Xs, int... Ys>
-typename Zip_t<Indices<Xs...>, Indices<Ys...>>::Diffs_t
+template<class Op, int... Xs, int... Ys> constexpr auto
 ZipWith(const Diffs<Xs...>& a, const Diffs<Ys...>& b)
 {
-  return Zip_t<Indices<Xs...>,
-               Indices<Ys...>>::Diffs_t::Make(Op::val_op(a.val, b.val),
-                                              ZipWithS<Op,
-                                              Indices<Xs...>,
-                                              Indices<Ys...>>::Zip(a, b));
+  using IX = Indices<Xs...>;
+  using IY = Indices<Ys...>;
+
+  using Res_t = typename Zip_t<IX, IY>::Diffs_t;
+
+  return Res_t::Make(Op::val_op(a.val, b.val),
+                     ZipWithS<Op, IX, IY>::Zip(a, b));
 }
 
 // Implement derivatives for the basic arithmetic operators
