@@ -63,13 +63,17 @@ template<int X, int... Xs> struct Indices<X, Xs...>: public Abstract
   }
 };
 
-
 template<int... Xs> class Diffs
 {
   using Idxs = Indices<Xs...>;
 
 public:
   Diffs() {} // default uninitialized(!)
+
+  static Diffs Make(double val, const std::array<double, sizeof...(Xs)>& arr)
+  {
+    return Diffs(val, arr);
+  }
 
   void Print(std::ostream& os) const
   {
@@ -91,12 +95,6 @@ protected:
   }
 
   std::array<double, Idxs::size> diffs;
-
-  // Grant Concat() access to this constructor
-  template<int Y, int... Ys> friend Diffs<Y, Ys...> Concat(double d, const Diffs<Ys...>& b);
-
-  // Likewise ZipWith()
-  template<class Op, class A, class B> friend struct ZipWithS;
 
   Diffs(double v, const decltype(diffs)& d) : val(v), diffs(d) {}
 };
@@ -156,16 +154,11 @@ template<int... Xs, int... Ys> struct ZipT<Indices<Xs...>, Indices<Ys...>>: publ
   using type = Concat_t<head_t, tail_t>;
 };
 
-// Add d/dX = d to b (X < Xs[0])
-template<int X, int... Xs> Diffs<X, Xs...> Concat(double d,
-                                                  const Diffs<Xs...>& b)
+template<size_t N> std::array<double, N+1> Concat(double d, const std::array<double, N>& a)
 {
-  static_assert(X < Indices<Xs...>::head);
-
-  return Diffs<X, Xs...>(b.val,
-                         std::apply([d](auto... n){
-                           return std::array<double, sizeof...(n)+1>{d, n...};},
-                           b.diffs));
+  return std::array<double, N+1>(std::apply([d](auto... n){
+    return std::array<double, sizeof...(n)+1>{d, n...};},
+      a));
 }
 
 // Struct supporting the ZipWith() function
@@ -177,7 +170,7 @@ ZipWithS<Op, Indices<Xs...>, Indices<Ys...>>: public Abstract
   using Z_t = Zip_t<Indices<Xs...>, Indices<Ys...>>;
 
   // Result of the zipping operation
-  using Res_t = typename Z_t::Diffs_t;
+  using Res_t = std::array<double, Z_t::size>;
 
   // Returns the result of zipping just indices Ws.. from a and Zs... from
   // b. Zipping here means applying the operator to combine each pair of
@@ -190,34 +183,32 @@ ZipWithS<Op, Indices<Xs...>, Indices<Ys...>>: public Abstract
     using itail_t = typename i::tail_t;
     using jtail_t = typename j::tail_t;
 
-    // Base case, no derivatives - combine the values using the operator
+    // Base case
     if constexpr(i::empty && j::empty){
-      return Diffs<>(Op::op(a.val, 0, b.val, 0).val, {});
+      return {};
     }
     else{
       // The head of i has no counterpart in j
       if constexpr(j::empty || (i::head < j::head)){
-        return Concat<i::head>(Op::op(a.val, a.template diff<i::head>(),
-                                      b.val, 0).diff,
-                               ZipWithS<Op, itail_t, j>::Zip(a, b));
+        return Concat(Op::diff_op(a.val, a.template diff<i::head>(), b.val, 0),
+                      ZipWithS<Op, itail_t, j>::Zip(a, b));
       }
 
       // Combine the heads of the two lists and recurse
       if constexpr(i::head == j::head){
-        return Concat<i::head>(Op::op(a.val, a.template diff<i::head>(),
-                                      b.val, b.template diff<i::head>()).diff,
-                               ZipWithS<Op, itail_t, jtail_t>::Zip(a, b));
+        return Concat(Op::diff_op(a.val, a.template diff<i::head>(),
+                                  b.val, b.template diff<i::head>()),
+                      ZipWithS<Op, itail_t, jtail_t>::Zip(a, b));
       }
 
       // The head of j has no counterpart in i
       if constexpr(i::empty || j::head < i::head){
-        return Concat<j::head>(Op::op(a.val, 0,
-                                      b.val, b.template diff<j::head>()).diff,
-                               ZipWithS<Op, i, jtail_t>::Zip(a, b));
+        return Concat(Op::diff_op(a.val, 0, b.val, b.template diff<j::head>()),
+                      ZipWithS<Op, i, jtail_t>::Zip(a, b));
       }
     }
 
-    abort();
+    __builtin_unreachable;
   }
 };
 
@@ -227,47 +218,42 @@ template<class Op, int... Xs, int... Ys>
 typename Zip_t<Indices<Xs...>, Indices<Ys...>>::Diffs_t
 ZipWith(const Diffs<Xs...>& a, const Diffs<Ys...>& b)
 {
-  return ZipWithS<Op, Indices<Xs...>, Indices<Ys...>>::Zip(a, b);
+  return Zip_t<Indices<Xs...>,
+               Indices<Ys...>>::Diffs_t::Make(Op::val_op(a.val, b.val),
+                                              ZipWithS<Op,
+                                              Indices<Xs...>,
+                                              Indices<Ys...>>::Zip(a, b));
 }
-
-// Return type of one of the differentiation operators. Combination of two
-// functions of the same variable gives one result value and one derivative.
-struct OpRet
-{
-  double val; double diff;
-};
 
 // Implement derivatives for the basic arithmetic operators
 
 struct AddOp: public Abstract
 {
-  static OpRet op(double u, double du, double v, double dv)
-  {
-    return {u+v, du+dv};
-  }
+  static double val_op(double u, double v){return u+v;}
+  static double diff_op(double, double du, double, double dv){return du+dv;}
 };
 
 struct SubOp: public Abstract
 {
-  static OpRet op(double u, double du, double v, double dv)
-  {
-    return {u-v, du-dv};
-  }
+  static double val_op(double u, double v){return u-v;}
+  static double diff_op(double, double du, double, double dv){return du-dv;}
 };
 
 struct MulOp: public Abstract
 {
-  static OpRet op(double u, double du, double v, double dv)
+  static double val_op(double u, double v){return u*v;}
+  static double diff_op(double u, double du, double v, double dv)
   {
-    return {u*v, u*dv + v*du};
+    return u*dv + v*du;
   }
 };
 
 struct DivOp: public Abstract
 {
-  static OpRet op(double u, double du, double v, double dv)
+  static double val_op(double u, double v){return u/v;}
+  static double diff_op(double u, double du, double v, double dv)
   {
-    return {u/v, (v*du - u*dv ) / (v*v)};
+    return (v*du - u*dv ) / (v*v);
   }
 };
 
