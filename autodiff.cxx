@@ -25,6 +25,8 @@ template<> struct Indices<>: public Abstract
 {
   static const bool empty = true;
   static const int head = std::numeric_limits<int>::max(); // TODO bad hack
+  typedef void head_t;
+  typedef void tail_t;
 
   static const int size = 0;
 
@@ -38,6 +40,7 @@ template<int X, int... Xs> struct Indices<X, Xs...>: public Abstract
 {
   static const bool empty = false;
   static const int head = X;
+  typedef Indices<X> head_t;
   typedef Indices<Xs...> tail_t;
 
   static const int size = sizeof...(Xs)+1;
@@ -118,14 +121,19 @@ template<int XY, int... Xs, int... Ys> struct ZipT<Indices<XY, Xs...>, Indices<X
   typedef Concat_t<Indices<XY>, Zip_t<Indices<Xs...>, Indices<Ys...>>> type;
 };
 
-template<int X, int... Xs, int Y, int... Ys> struct ZipT<Indices<X, Xs...>, Indices<Y, Ys...>>: public Abstract
+template<int... Xs, int... Ys> struct ZipT<Indices<Xs...>, Indices<Ys...>>: public Abstract
 {
-  using IX = Indices<X, Xs...>;
-  using IY = Indices<Y, Ys...>;
+  using IX = Indices<Xs...>;
+  using IY = Indices<Ys...>;
 
-  typedef std::conditional_t<(X < Y),
-    Concat_t<Indices<X>, Zip_t<Indices<Xs...>, IY>>,
-    Concat_t<Indices<Y>, Zip_t<IX, Indices<Ys...>>>> type;
+  using head_t = std::conditional_t<(IX::head < IY::head),
+                                    typename IX::head_t, typename IY::head_t>;
+
+  using tail_t = std::conditional_t<(IX::head < IY::head),
+                                    Zip_t<typename IX::tail_t, IY>,
+                                    Zip_t<IX, typename IY::tail_t>>;
+
+  using type = Concat_t<head_t, tail_t>;
 };
 
 // Add d/dX = d to b (X < Xs[0])
@@ -145,12 +153,17 @@ template<class Op, class IDXA, class IDXB> struct ZipWithS;
 template<class Op, int... Xs, int... Ys> struct
 ZipWithS<Op, Indices<Xs...>, Indices<Ys...>>: public Abstract
 {
-  typedef typename Zip_t<Indices<Xs...>, Indices<Ys...>>::Diffs_t Res_t;
+  using Z_t = Zip_t<Indices<Xs...>, Indices<Ys...>>;
+
+  using Res_t = typename Z_t::Diffs_t;
 
   template<int... Ws, int... Zs> static Res_t Zip(const Diffs<Ws...>& a, const Diffs<Zs...>& b)
   {
     using i = Indices<Xs...>;
     using j = Indices<Ys...>;
+
+    using itail_t = typename i::tail_t;
+    using jtail_t = typename j::tail_t;
 
     if constexpr(i::empty && j::empty){
       Diffs<> ret;
@@ -161,19 +174,19 @@ ZipWithS<Op, Indices<Xs...>, Indices<Ys...>>: public Abstract
       if constexpr(j::empty || (i::head < j::head)){
         return Concat<i::head>(Op::op(a.val, a.template diff<i::head>(),
                                       b.val, 0).diff,
-                               ZipWithS<Op, typename i::tail_t, j>::Zip(a, b));
+                               ZipWith<Op, itail_t, j>::Zip(a, b));
       }
 
       if constexpr(i::head == j::head){
         return Concat<i::head>(Op::op(a.val, a.template diff<i::head>(),
                                       b.val, b.template diff<i::head>()).diff,
-                               ZipWithS<Op, typename i::tail_t, typename j::tail_t>::Zip(a, b));
+                               ZipWithS<Op, itail_t, jtail_t>::Zip(a, b));
       }
 
       if constexpr(i::empty || j::head < i::head){
         return Concat<j::head>(Op::op(a.val, 0,
                                       b.val, b.template diff<j::head>()).diff,
-                               ZipWithS<Op, i, typename j::tail_t>::Zip(a, b));
+                               ZipWithS<Op, i, jtail_t>::Zip(a, b));
       }
     }
 
