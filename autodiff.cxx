@@ -154,11 +154,10 @@ template<int... Xs, int... Ys> struct ZipT<Indices<Xs...>, Indices<Ys...>>: publ
   using type = Concat_t<head_t, tail_t>;
 };
 
-template<size_t N> std::array<double, N+1> Concat(double d, const std::array<double, N>& a)
+// Concat(w, [x, y, z]) = [w, x, y, z]
+template<size_t N> std::array<double, N+1> Concat(double d, const std::array<double, N>& arr)
 {
-  return std::array<double, N+1>(std::apply([d](auto... n){
-    return std::array<double, sizeof...(n)+1>{d, n...};},
-      a));
+  return std::apply([d](auto... n){return std::array<double, sizeof...(n)+1>{d, n...};}, arr);
 }
 
 // Struct supporting the ZipWith() function
