@@ -1,7 +1,8 @@
 //g++ -std=c++1z autodiff.cxx
 
+#include <array>
 #include <iostream>
-#include <utility>
+#include <limits>
 
 // Default - may be specialized by user
 template<int X> std::string var_name()
@@ -9,33 +10,6 @@ template<int X> std::string var_name()
   return std::to_string(X);
 }
 
-template<int X> struct OneDiff
-{
-  double diff;
-};
-
-
-template<int... Xs> class Diffs : protected OneDiff<Xs>...
-{
-public:
-  void Print(std::ostream& os) const
-  {
-    os << "Value = " << val << std::endl;
-    Print<Xs...>(os);
-  }
-
-  template<int i> const double& diff() const{return OneDiff<i>::diff;}
-  template<int i>       double& diff()      {return OneDiff<i>::diff;}
-
-  double val;
-
- protected:
-  template<int Y, int... Ys> void Print(std::ostream& os) const
-  {
-    os << "  d/d" << var_name<Y>() << " = " << diff<Y>() << std::endl;
-    if constexpr(sizeof...(Ys) > 0) Print<Ys...>(os);
-  }
-};
 
 class Abstract
 {
@@ -44,13 +18,19 @@ private:
 };
 
 template<int... Xs> struct Indices;
+template<int... Xs> class Diffs;
 
 template<> struct Indices<>: public Abstract
 {
   static const bool empty = true;
   static const int head = std::numeric_limits<int>::max(); // TODO bad hack
 
+  static const int size = 0;
+
   typedef Diffs<> Diffs_t;
+
+  // Don't implement IndexOf() here. Accessing an invalid index will then be a
+  // failure to find Indices<>::IndexOf().
 };
 
 template<int X, int... Xs> struct Indices<X, Xs...>: public Abstract
@@ -59,7 +39,43 @@ template<int X, int... Xs> struct Indices<X, Xs...>: public Abstract
   static const int head = X;
   typedef Indices<Xs...> tail_t;
 
+  static const int size = sizeof...(Xs)+1;
+
   typedef Diffs<X, Xs...> Diffs_t;
+
+  template<int Y> static constexpr/*consteval*/ int IndexOf()
+  {
+    if constexpr(Y == X)
+      return 0;
+    else
+      return 1+tail_t::template IndexOf<Y>();}
+};
+
+
+template<int... Xs> class Diffs
+{
+  using Idxs = Indices<Xs...>;
+
+public:
+  void Print(std::ostream& os) const
+  {
+    os << "Value = " << val << std::endl;
+    Print<Xs...>(os);
+  }
+
+  template<int i> const double& diff() const{return diffs[Idxs::template IndexOf<i>()];}
+  template<int i>       double& diff()      {return diffs[Idxs::template IndexOf<i>()];}
+
+  double val;
+
+protected:
+  template<int Y, int... Ys> void Print(std::ostream& os) const
+  {
+    os << "  d/d" << var_name<Y>() << " = " << diff<Y>() << std::endl;
+    if constexpr(sizeof...(Ys) > 0) Print<Ys...>(os);
+  }
+
+  std::array<double, Idxs::size> diffs;
 };
 
 
